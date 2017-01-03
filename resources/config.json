@@ -1,0 +1,15 @@
+{
+	"scripts": [
+		{
+			"path": "resources/script1.js",
+			"inputTopic": "input1",
+			"outputTopic": "output1"
+		}
+	],
+	"props": {
+		"application.id": "kafkajstest1",
+		"bootstrap.servers": "127.0.0.1:9092",
+		"zookeeper.connect": "127.0.0.1:2181",
+		"client.id": "kafkajstest1"
+	}
+}
