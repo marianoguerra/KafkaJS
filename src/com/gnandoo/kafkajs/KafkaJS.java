@@ -8,7 +8,6 @@ import java.util.Iterator;
 import java.util.Map.Entry;
 import java.util.Properties;
 
-import javax.script.Invocable;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
@@ -20,6 +19,7 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KStreamBuilder;
 import org.apache.kafka.streams.kstream.KeyValueMapper;
+import org.apache.kafka.streams.processor.WallclockTimestampExtractor;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -29,14 +29,20 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class KafkaJS {
 	
-	public static Invocable loadScript(final String path) throws FileNotFoundException, ScriptException {
+	public static ScriptEngine loadScript(final String path) throws FileNotFoundException, ScriptException {
 		ScriptEngine engine = new ScriptEngineManager().getEngineByName("nashorn");
 		engine.eval(new FileReader(path));
 
-		return (Invocable) engine;
+		return engine;
 	}
 	
-	public static Invocable configureScript(final ObjectNode config) throws FileNotFoundException, ScriptException, NoSuchMethodException {
+	public static String jsonToString(final JsonNode node) throws JsonProcessingException {
+		// TODO: see if thread safe and move it out
+		ObjectMapper mapper = new ObjectMapper();
+	    return mapper.writeValueAsString(node);
+	}
+	
+	public static KScript configureScript(final ObjectNode config) throws FileNotFoundException, ScriptException, NoSuchMethodException, JsonProcessingException {
 		final JsonNode scriptPathRaw = config.get("path");
 		
 		if (!scriptPathRaw.isTextual()) {
@@ -45,7 +51,9 @@ public class KafkaJS {
 		}
 		
 		final String scriptPath = scriptPathRaw.asText();
-		final Invocable script = loadScript(scriptPath);
+		final KScript script = new KScript(loadScript(scriptPath));
+		
+		script.init(jsonToString(config));
 		
 		return script;
 	}
@@ -107,6 +115,8 @@ public class KafkaJS {
 		final Properties props = objectNodeToProperties(propsJson);
 		props.put(StreamsConfig.KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
         props.put(StreamsConfig.VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
+        props.put(StreamsConfig.TIMESTAMP_EXTRACTOR_CLASS_CONFIG,  WallclockTimestampExtractor.class.getName());
+
 		
 		for (int i = 0; i < scriptsCount; i++) {
 			final JsonNode scriptConfigRaw = scripts.get(i);
@@ -132,7 +142,7 @@ public class KafkaJS {
 			
 			final String inputTopic = inputTopicRaw.asText();
 			final String outputTopic = outputTopicRaw.asText();
-			final Invocable script = configureScript(scriptConfig);
+			final KScript script = configureScript(scriptConfig);
 			
 			final KStream<String, String> source = builder.stream(inputTopic);
 			final KStream<String, String> processor = source.map(new KeyValueMapper<String, String, KeyValue<String, String>>() {
@@ -141,7 +151,7 @@ public class KafkaJS {
 					String result;
 
 					try {
-						result = (String)script.invokeFunction("onMessage", key, value);
+						result = script.onMessage(key, value);
 					} catch (NoSuchMethodException e) {
 						throw new RuntimeException(e);
 					} catch (ScriptException e) {
