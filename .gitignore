@@ -2,3 +2,6 @@
 .project
 .settings/
 target/
+*.swp
+dependency-reduced-pom.xml
+
